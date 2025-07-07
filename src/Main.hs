@@ -1,7 +1,7 @@
 module Main where
 
-import System.IO (hFlush, stdout)
 import Control.Monad (when)
+import System.IO (hFlush, stdout)
 import Text.Read (readMaybe)
 
 newtype TaskId = TaskId Int
@@ -10,18 +10,18 @@ newtype TaskId = TaskId Int
 data Command = Exit | List | Complete TaskId | Delete TaskId | Edit TaskId String
   deriving (Show)
 
-data Task = Task {
-    taskId :: TaskId,
+data Task = Task
+  { taskId :: TaskId,
     description :: String
-}
+  }
 
 parseCommand :: String -> Maybe Command
 parseCommand s = case words s of
-  "exit":_ -> Just Exit
-  "list":_ -> Just List
-  "complete":n:_ -> Complete . TaskId <$> readMaybe n
-  "delete":n:_ -> Delete . TaskId <$> readMaybe n
-  "edit":n:rest -> (Edit . TaskId <$> readMaybe n) <*> pure (unwords rest)
+  "exit" : _ -> Just Exit
+  "list" : _ -> Just List
+  "complete" : n : _ -> Complete . TaskId <$> readMaybe n
+  "delete" : n : _ -> Delete . TaskId <$> readMaybe n
+  "edit" : n : rest -> (Edit . TaskId <$> readMaybe n) <*> pure (unwords rest)
   _ -> Nothing
 
 main :: IO ()
