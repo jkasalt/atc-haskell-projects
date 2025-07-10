@@ -6,7 +6,14 @@ import Text.Read (readEither)
 newtype TaskId = TaskId Int
   deriving (Show)
 
-data Command = Help | Exit | List | Complete TaskId | Delete TaskId | Edit TaskId String
+data Command
+  = Help
+  | Exit
+  | List
+  | New String
+  | Complete TaskId
+  | Delete TaskId
+  | Edit TaskId String
   deriving (Show)
 
 data Task = Task
@@ -15,36 +22,44 @@ data Task = Task
   }
 
 missingNumError :: String -> String
-missingNumError command = "For `" ++ command ++ "` you need to specify the id. For example `" ++ command ++ " 4`. Try the `list` command to see all tasks and their id"
+missingNumError command =
+  "For the `"
+    ++ command
+    ++ "` command, you need to specify the id. For example `"
+    ++ command
+    ++ " 4`. Try the `list` command to see all tasks and their id."
 
 (<?>) :: Either a b -> String -> Either String b
 Left _ <?> msg = Left msg
 Right a <?> _ = Right a
 
-readNum :: (Read a) => String -> Either String a
-readNum n = readEither n <?> errMsg
+readTaskId :: String -> Either String TaskId
+readTaskId n = TaskId <$> readEither n <?> errMsg
   where
     errMsg = "Failed to parse task id: " ++ n
 
 parseCommand :: String -> Either String Command
 parseCommand s = case words s of
-  "help" : _ -> Right Help
-  "exit" : _ -> Right Exit
-  "list" : _ -> Right List
-  "complete" : n : _ -> Complete . TaskId <$> readNum n
-  "delete" : n : _ -> Delete . TaskId <$> readNum n
-  "edit" : n : rest -> (Edit . TaskId <$> readNum n) <*> pure (unwords rest)
+  "help" : _ -> pure Help
+  "exit" : _ -> pure Exit
+  "list" : _ -> pure List
+  ["new"] -> Left "Missing description of new command."
   ["complete"] -> Left $ missingNumError "complete"
   ["delete"] -> Left $ missingNumError "complete"
   ["edit"] -> Left $ missingNumError "complete"
+  "complete" : n : _ -> Complete <$> readTaskId n
+  "delete" : n : _ -> Delete <$> readTaskId n
+  "edit" : n : rest -> Edit <$> readTaskId n <*> pure (unwords rest)
+  "new" : rest -> pure $ New $ unwords rest
   _ -> Left $ "Unknown command `" ++ s ++ "` (try `help` command)"
 
 helpText :: String
 helpText =
   unlines
-    [ "help - prints the help text",
-      "exit - exits the repl",
-      "list - lists the tasks",
+    [ "help - print the help text",
+      "exit - exit the repl",
+      "list - list the tasks",
+      "new {text} - create a new command with {text} as description",
       "complete {id} - mark task with id {id} as completed",
       "delete {id} - deletes task with id {id}",
       "edit {id} {text} - replaces the description of task with id {id} with {text}"
@@ -65,9 +80,16 @@ loop = do
     Left err -> do
       putStrLn err
       loop
-    Right Exit -> do
-      putStrLn "goodbye!"
-      return ()
     Right c -> do
-      print c
-      loop
+      case c of
+        Exit -> putStrLn "goodbye!"
+        Help -> putStrLn helpText
+        List -> putStrLn "listing"
+        New s -> putStrLn $ "creating new " ++ s
+        Complete taskid -> putStrLn $ "completing task " ++ show taskid
+        Delete taskid -> putStrLn $ "deleting task " ++ show taskid
+        Edit taskid s -> putStrLn $ "editing task " ++ show taskid ++ " with " ++ s
+      ending c
+      where
+        ending Exit = return ()
+        ending _ = loop
