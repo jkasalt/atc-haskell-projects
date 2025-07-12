@@ -1,10 +1,16 @@
+{-# LANGUAGE DeriveGeneric #-}
+
 module Main where
 
+import Data.Aeson (ToJSON, defaultOptions, genericToEncoding)
+import GHC.Generics (Generic)
 import System.IO (hFlush, stdout)
 import Text.Read (readEither)
 
 newtype TaskId = TaskId Int
-  deriving (Show)
+  deriving (Show, Generic)
+
+instance ToJSON TaskId
 
 data Command
   = Help
@@ -14,7 +20,9 @@ data Command
   | Complete TaskId
   | Delete TaskId
   | Edit TaskId String
-  deriving (Show)
+  deriving (Show, Generic)
+
+instance ToJSON Command
 
 data Task = Task
   { taskId :: TaskId,
