@@ -22,7 +22,7 @@
         {
           treefmt.programs = {
             nixfmt.enable = true;
-            ormolu.enable = true;
+            fourmolu.enable = true;
             cabal-gild.enable = true;
             hlint.enable = true;
             statix.enable = true;
