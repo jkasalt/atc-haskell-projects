@@ -58,6 +58,7 @@ data Task
     = Task
     { taskId :: TaskId
     , description :: String
+    , completed :: Bool
     }
     deriving
         (Show, Generic)
@@ -131,12 +132,27 @@ handleCommand tasks command = case command of
     List -> do
         print tasks
         return $ Just tasks
-    New s -> do
-        let newTaskId = TaskId $ Prelude.foldr (max . getTaskId . taskId) 0 tasks
-        let newTask = Task newTaskId s
-        return $ Just $ newTask : tasks
-    Complete taskid -> return $ Just $ filter (\t -> taskId t /= taskid) tasks
-    Delete taskid -> return $ Just $ filter (\t -> taskId t /= taskid) tasks
-    Edit taskid s -> do
-        let newTasks = map (\t -> if taskId t == taskid then Task taskid s else t) tasks
-        return $ Just newTasks
+    New s ->
+        let newTaskId = TaskId $ (+ 1) $ Prelude.foldr (max . getTaskId . taskId) 0 tasks
+            newTask = Task newTaskId s False
+         in return $ Just $ newTask : tasks
+    Complete taskid -> withIdCheck taskid tasks (return $ Just $ editTaskList taskid completeTask tasks)
+    Delete taskid -> withIdCheck taskid tasks (return $ Just $ filter (\t -> taskId t /= taskid) tasks)
+    Edit taskid s -> withIdCheck taskid tasks (return $ Just $ editTaskList taskid (editTaskDescription s) tasks)
+
+withIdCheck :: TaskId -> [Task] -> IO (Maybe [Task]) -> IO (Maybe [Task])
+withIdCheck taskid tasks action =
+    if taskid `elem` map taskId tasks
+        then action
+        else do
+            putStrLn ("There is no task with id " ++ show (getTaskId taskid))
+            return $ Just tasks
+
+editTaskList :: TaskId -> (Task -> Task) -> [Task] -> [Task]
+editTaskList taskIdd modification = map (\t -> if taskId t == taskIdd then modification t else t)
+
+editTaskDescription :: String -> Task -> Task
+editTaskDescription newDescritption (Task taskid _ compl) = Task taskid newDescritption compl
+
+completeTask :: Task -> Task
+completeTask (Task taskid desc _) = Task taskid desc True
