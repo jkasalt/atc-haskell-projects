@@ -2,14 +2,36 @@
 
 module Main where
 
-import Control.Exception
-import Data.Aeson
+import Control.Monad (unless)
+import Data.Aeson (
+    FromJSON,
+    ToJSON (toEncoding),
+    decode,
+    defaultOptions,
+    encode,
+    genericToEncoding,
+ )
 import qualified Data.ByteString.Lazy.Char8 as BL
-import qualified Data.Foldable
 import qualified Data.Maybe
-import GHC.Generics
-import System.IO (hFlush, stdout)
+import GHC.Generics (Generic)
+import System.Directory (doesFileExist)
+import System.IO (hFlush, readFile', stdout)
 import Text.Read (readEither)
+
+helpText :: String
+helpText =
+    unlines
+        [ "help - print the help text"
+        , "exit - exit the repl"
+        , "list - list the tasks"
+        , "new {text} - create a new command with {text} as description"
+        , "complete {id} - mark task with id {id} as completed"
+        , "delete {id} - delete task with id {id}"
+        , "edit {id} {text} - replace the description of task with id {id} with {text}"
+        ]
+
+taskfile :: FilePath
+taskfile = "tasks.txt"
 
 newtype TaskId = TaskId Int
     deriving (Eq, Show, Generic)
@@ -69,37 +91,33 @@ parseCommand s = case words s of
     "list" : _ -> pure List
     ["new"] -> Left "Missing description of new command."
     ["complete"] -> Left $ missingNumError "complete"
-    ["delete"] -> Left $ missingNumError "complete"
-    ["edit"] -> Left $ missingNumError "complete"
+    ["delete"] -> Left $ missingNumError "delete"
+    ["edit"] -> Left $ missingNumError "edit"
     "complete" : n : _ -> Complete <$> readTaskId n
     "delete" : n : _ -> Delete <$> readTaskId n
     "edit" : n : rest -> Edit <$> readTaskId n <*> pure (unwords rest)
     "new" : rest -> pure $ New $ unwords rest
     _ -> Left $ "Unknown command `" ++ s ++ "` (try `help` command)"
 
-helpText :: String
-helpText =
-    unlines
-        [ "help - print the help text"
-        , "exit - exit the repl"
-        , "list - list the tasks"
-        , "new {text} - create a new command with {text} as description"
-        , "complete {id} - mark task with id {id} as completed"
-        , "delete {id} - deletes task with id {id}"
-        , "edit {id} {text} - replaces the description of task with id {id} with {text}"
-        ]
-
 main :: IO ()
 main = do
     putStrLn helpText
-    file <- (try $ readFile "tasks.txt") :: IO (Either SomeException String)
-    fileContent <- case file of
-        Left _ -> do
-            writeFile "tasks.txt" "[]"
-            readFile "tasks.txt"
-        Right content -> pure content
+    fileExists <- doesFileExist taskfile
+    unless fileExists $ writeFile taskfile "[]"
+    fileContent <- readFile' taskfile
     let tasks = decode $ BL.pack fileContent
     loop $ Data.Maybe.fromMaybe [] tasks
+
+loop :: [Task] -> IO ()
+loop tasks = do
+    putStr "Enter command: "
+    hFlush stdout
+    input <- getLine
+    case parseCommand input of
+        Left err -> do
+            putStrLn err
+            loop tasks
+        Right c -> handleCommand tasks c >>= mapM_ loop
 
 handleCommand :: [Task] -> Command -> IO (Maybe [Task])
 handleCommand tasks command = case command of
@@ -122,16 +140,3 @@ handleCommand tasks command = case command of
     Edit taskid s -> do
         let newTasks = map (\t -> if taskId t == taskid then Task taskid s else t) tasks
         return $ Just newTasks
-
-loop :: [Task] -> IO ()
-loop tasks = do
-    putStr "Enter command: "
-    hFlush stdout
-    input <- getLine
-    case parseCommand input of
-        Left err -> do
-            putStrLn err
-            loop tasks
-        Right c -> do
-            newTasks <- handleCommand tasks c
-            Data.Foldable.forM_ newTasks loop
