@@ -12,7 +12,8 @@ import Data.Aeson (
     genericToEncoding,
  )
 import qualified Data.ByteString.Lazy.Char8 as BL
-import qualified Data.Maybe
+import Data.List (find)
+import Data.Maybe (fromMaybe)
 import GHC.Generics (Generic)
 import System.Directory (doesFileExist)
 import System.IO (hFlush, readFile', stdout)
@@ -49,10 +50,11 @@ data Command
     | Exit
     | List
     | New String
-    | Complete TaskId
-    | Delete TaskId
-    | Edit TaskId String
-    deriving (Show, Generic)
+    | Update TaskId UpdateMode
+    deriving (Show)
+
+data UpdateMode = Complete | Delete | Edit String
+    deriving (Show)
 
 data Task
     = Task
@@ -94,9 +96,9 @@ parseCommand s = case words s of
     ["complete"] -> Left $ missingNumError "complete"
     ["delete"] -> Left $ missingNumError "delete"
     ["edit"] -> Left $ missingNumError "edit"
-    "complete" : n : _ -> Complete <$> readTaskId n
-    "delete" : n : _ -> Delete <$> readTaskId n
-    "edit" : n : rest -> Edit <$> readTaskId n <*> pure (unwords rest)
+    "complete" : n : _ -> Update <$> readTaskId n <*> pure Complete
+    "delete" : n : _ -> Update <$> readTaskId n <*> pure Delete
+    "edit" : n : rest -> Update <$> readTaskId n <*> pure (Edit $ unwords rest)
     "new" : rest -> pure $ New $ unwords rest
     _ -> Left $ "Unknown command `" ++ s ++ "` (try `help` command)"
 
@@ -107,7 +109,7 @@ main = do
     unless fileExists $ writeFile taskfile "[]"
     fileContent <- readFile' taskfile
     let tasks = decode $ BL.pack fileContent
-    loop $ Data.Maybe.fromMaybe [] tasks
+    loop $ fromMaybe [] tasks
 
 loop :: [Task] -> IO ()
 loop tasks = do
@@ -118,38 +120,59 @@ loop tasks = do
         Left err -> do
             putStrLn err
             loop tasks
-        Right c -> handleCommand tasks c >>= mapM_ loop
+        Right c -> case handleCommand tasks c of
+            DoExit -> do
+                let encoded = BL.unpack $ encode tasks
+                writeFile taskfile encoded
+                return ()
+            Print s -> do
+                putStrLn s
+                loop tasks
+            Replace t -> loop t
 
-handleCommand :: [Task] -> Command -> IO (Maybe [Task])
+data HandleAction = DoExit | Print String | Replace [Task]
+
+handleCommand :: [Task] -> Command -> HandleAction
 handleCommand tasks command = case command of
-    Exit -> do
-        let encodedTasks = BL.unpack $ encode tasks
-        writeFile "tasks.txt" encodedTasks
-        return Nothing
-    Help -> do
-        putStrLn helpText
-        return $ Just tasks
-    List -> do
-        print tasks
-        return $ Just tasks
+    Exit -> DoExit
+    Help -> Print helpText
+    List -> Print $ show tasks
     New s ->
         let newTaskId = TaskId $ (+ 1) $ Prelude.foldr (max . getTaskId . taskId) 0 tasks
             newTask = Task newTaskId s False
-         in return $ Just $ newTask : tasks
-    Complete taskid -> withIdCheck taskid tasks (return $ Just $ editTaskList taskid completeTask tasks)
-    Delete taskid -> withIdCheck taskid tasks (return $ Just $ filter (\t -> taskId t /= taskid) tasks)
-    Edit taskid s -> withIdCheck taskid tasks (return $ Just $ editTaskList taskid (editTaskDescription s) tasks)
+         in Replace $ newTask : tasks
+    Update taskid mode ->
+        let
+            idCheck = idExists taskid tasks
+            action = case mode of
+                Complete -> editTaskList taskid completeTask
+                Delete -> filter (\t -> taskId t /= taskid)
+                Edit s -> editTaskList taskid (editTaskDescription s)
+            checks = case mode of
+                Complete -> idCheck >>= notCompleted taskid
+                Delete -> idCheck
+                Edit _ -> idCheck
+         in
+            case checks of
+                Left err -> Print err
+                Right t -> Replace $ action t
 
-withIdCheck :: TaskId -> [Task] -> IO (Maybe [Task]) -> IO (Maybe [Task])
-withIdCheck taskid tasks action =
+idExists :: TaskId -> [Task] -> Either [Char] [Task]
+idExists taskid tasks =
     if taskid `elem` map taskId tasks
-        then action
-        else do
-            putStrLn ("There is no task with id " ++ show (getTaskId taskid))
-            return $ Just tasks
+        then Right tasks
+        else Left $ "There is no task with id " ++ show (getTaskId taskid)
+
+notCompleted :: TaskId -> [Task] -> Either String [Task]
+notCompleted taskid tasks = case find (\t -> taskId t == taskid) tasks of
+    Nothing -> Left $ "There is no task with id " ++ show (getTaskId taskid)
+    Just t ->
+        if completed t
+            then Left $ "Task " ++ show (getTaskId taskid) ++ " is already completed."
+            else Right tasks
 
 editTaskList :: TaskId -> (Task -> Task) -> [Task] -> [Task]
-editTaskList taskIdd modification = map (\t -> if taskId t == taskIdd then modification t else t)
+editTaskList taskid modification = map (\t -> if taskId t == taskid then modification t else t)
 
 editTaskDescription :: String -> Task -> Task
 editTaskDescription newDescritption (Task taskid _ compl) = Task taskid newDescritption compl
