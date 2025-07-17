@@ -22,13 +22,14 @@ import Text.Read (readEither)
 helpText :: String
 helpText =
     unlines
-        [ "help - print the help text"
-        , "exit - exit the repl"
-        , "list - list the tasks"
-        , "new {text} - create a new command with {text} as description"
-        , "complete {id} - mark task with id {id} as completed"
-        , "delete {id} - delete task with id {id}"
-        , "edit {id} {text} - replace the description of task with id {id} with {text}"
+        [ "help - Print the help text"
+        , "exit - Exit the repl"
+        , "list - List the tasks"
+        , "next - List uncompleted tasks (\"next actions\")"
+        , "new {text} - Create a new command with {text} as description"
+        , "complete {id} - Mark task with id {id} as completed"
+        , "delete {id} - Delete task with id {id}"
+        , "edit {id} {text} - Replace the description of task with id {id} with {text}"
         ]
 
 taskfile :: FilePath
@@ -47,6 +48,7 @@ instance FromJSON TaskId
 
 data Command
     = Help
+    | Next
     | Exit
     | List
     | New String
@@ -92,6 +94,7 @@ parseCommand s = case words s of
     "help" : _ -> pure Help
     "exit" : _ -> pure Exit
     "list" : _ -> pure List
+    "next" : _ -> pure Next
     ["new"] -> Left "Missing description of new command."
     ["complete"] -> Left $ missingNumError "complete"
     ["delete"] -> Left $ missingNumError "delete"
@@ -137,6 +140,7 @@ handleCommand tasks command = case command of
     Exit -> DoExit
     Help -> Print helpText
     List -> Print $ show tasks
+    Next -> Print $ show $ filter (not . completed) tasks
     New s ->
         let newTaskId = TaskId $ (+ 1) $ Prelude.foldr (max . getTaskId . taskId) 0 tasks
             newTask = Task newTaskId s False
@@ -144,16 +148,16 @@ handleCommand tasks command = case command of
     Update taskid mode ->
         let
             idCheck = idExists taskid tasks
-            action = case mode of
-                Complete -> editTaskList taskid completeTask
-                Delete -> filter (\t -> taskId t /= taskid)
-                Edit s -> editTaskList taskid (editTaskDescription s)
-            checks = case mode of
+            check = case mode of
                 Complete -> idCheck >>= notCompleted taskid
                 Delete -> idCheck
                 Edit _ -> idCheck
+            action = case mode of
+                Complete -> modifyTask taskid completeTask
+                Delete -> filter (\t -> taskId t /= taskid)
+                Edit s -> modifyTask taskid (editTaskDescription s)
          in
-            case checks of
+            case check of
                 Left err -> Print err
                 Right t -> Replace $ action t
 
@@ -171,8 +175,8 @@ notCompleted taskid tasks = case find (\t -> taskId t == taskid) tasks of
             then Left $ "Task " ++ show (getTaskId taskid) ++ " is already completed."
             else Right tasks
 
-editTaskList :: TaskId -> (Task -> Task) -> [Task] -> [Task]
-editTaskList taskid modification = map (\t -> if taskId t == taskid then modification t else t)
+modifyTask :: TaskId -> (Task -> Task) -> [Task] -> [Task]
+modifyTask taskid modification = map (\t -> if taskId t == taskid then modification t else t)
 
 editTaskDescription :: String -> Task -> Task
 editTaskDescription newDescritption (Task taskid _ compl) = Task taskid newDescritption compl
