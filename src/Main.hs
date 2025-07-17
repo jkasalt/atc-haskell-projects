@@ -13,7 +13,7 @@ import Data.Aeson (
  )
 import qualified Data.ByteString.Lazy.Char8 as BL
 import Data.List (find)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isNothing)
 import GHC.Generics (Generic)
 import System.Directory (doesFileExist)
 import System.IO (hFlush, readFile', stdout)
@@ -26,7 +26,9 @@ helpText =
         , "exit - Exit the repl"
         , "list - List the tasks"
         , "next - List uncompleted tasks (\"next actions\")"
+        , "list-done - List completed tasks"
         , "new {text} - Create a new command with {text} as description"
+        , "           - you may set a priority by writing \"priority={low|medium|high}\" as the first word"
         , "complete {id} - Mark task with id {id} as completed"
         , "delete {id} - Delete task with id {id}"
         , "edit {id} {text} - Replace the description of task with id {id} with {text}"
@@ -51,18 +53,28 @@ data Command
     | Next
     | Exit
     | List
-    | New String
+    | ListDone
+    | New (Maybe Priority) String
     | Update TaskId UpdateMode
     deriving (Show)
 
 data UpdateMode = Complete | Delete | Edit String
     deriving (Show)
 
+data Priority = Low | Medium | High
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON Priority where
+    toEncoding = genericToEncoding defaultOptions
+
+instance FromJSON Priority
+
 data Task
     = Task
     { taskId :: TaskId
     , description :: String
     , completed :: Bool
+    , priority :: Maybe Priority
     }
     deriving
         (Show, Generic)
@@ -94,6 +106,7 @@ parseCommand s = case words s of
     "help" : _ -> pure Help
     "exit" : _ -> pure Exit
     "list" : _ -> pure List
+    "list-done" : _ -> pure ListDone
     "next" : _ -> pure Next
     ["new"] -> Left "Missing description of new command."
     ["complete"] -> Left $ missingNumError "complete"
@@ -102,7 +115,16 @@ parseCommand s = case words s of
     "complete" : n : _ -> Update <$> readTaskId n <*> pure Complete
     "delete" : n : _ -> Update <$> readTaskId n <*> pure Delete
     "edit" : n : rest -> Update <$> readTaskId n <*> pure (Edit $ unwords rest)
-    "new" : rest -> pure $ New $ unwords rest
+    "new" : prio : rest ->
+        let
+            p = case prio of
+                "priority=low" -> Just Low
+                "priority=medium" -> Just Medium
+                "priority=high" -> Just High
+                _ -> Nothing
+            desc = unwords (if isNothing p then prio : rest else rest)
+         in
+            pure $ New p desc
     _ -> Left $ "Unknown command `" ++ s ++ "` (try `help` command)"
 
 main :: IO ()
@@ -140,10 +162,11 @@ handleCommand tasks command = case command of
     Exit -> DoExit
     Help -> Print helpText
     List -> Print $ show tasks
+    ListDone -> Print $ show $ filter completed tasks
     Next -> Print $ show $ filter (not . completed) tasks
-    New s ->
+    New p s ->
         let newTaskId = TaskId $ (+ 1) $ Prelude.foldr (max . getTaskId . taskId) 0 tasks
-            newTask = Task newTaskId s False
+            newTask = Task newTaskId s False p
          in Replace $ newTask : tasks
     Update taskid mode ->
         let
@@ -154,7 +177,7 @@ handleCommand tasks command = case command of
                 Edit _ -> idCheck
             action = case mode of
                 Complete -> modifyTask taskid completeTask
-                Delete -> filter (\t -> taskId t /= taskid)
+                Delete -> filter ((/= taskid) . taskId)
                 Edit s -> modifyTask taskid (editTaskDescription s)
          in
             case check of
@@ -179,7 +202,7 @@ modifyTask :: TaskId -> (Task -> Task) -> [Task] -> [Task]
 modifyTask taskid modification = map (\t -> if taskId t == taskid then modification t else t)
 
 editTaskDescription :: String -> Task -> Task
-editTaskDescription newDescritption (Task taskid _ compl) = Task taskid newDescritption compl
+editTaskDescription newDescritption (Task taskid _ compl prio) = Task taskid newDescritption compl prio
 
 completeTask :: Task -> Task
-completeTask (Task taskid desc _) = Task taskid desc True
+completeTask (Task taskid desc _ prio) = Task taskid desc True prio
