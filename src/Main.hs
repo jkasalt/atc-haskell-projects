@@ -16,6 +16,7 @@ import Data.List (find)
 import Data.Maybe (fromMaybe, isNothing)
 import GHC.Generics (Generic)
 import System.Directory (doesFileExist)
+import System.Environment (getArgs)
 import System.IO (hFlush, readFile', stdout)
 import Text.Read (readEither)
 
@@ -69,8 +70,7 @@ instance ToJSON Priority where
 
 instance FromJSON Priority
 
-data Task
-    = Task
+data Task = Task
     { taskId :: TaskId
     , description :: String
     , completed :: Bool
@@ -129,7 +129,13 @@ parseCommand s = case words s of
 
 main :: IO ()
 main = do
-    putStrLn helpText
+    args <- getArgs
+    if "-h" `elem` args || "--help" `elem` args
+        then putStrLn helpText
+        else initLoop
+
+initLoop :: IO ()
+initLoop = do
     fileExists <- doesFileExist taskfile
     unless fileExists $ writeFile taskfile "[]"
     fileContent <- readFile' taskfile
@@ -164,15 +170,15 @@ handleCommand tasks command = case command of
     List -> Print $ show tasks
     ListDone -> Print $ show $ filter completed tasks
     Next -> Print $ show $ filter (not . completed) tasks
-    New p s ->
+    New prio desc ->
         let newTaskId = TaskId $ (+ 1) $ Prelude.foldr (max . getTaskId . taskId) 0 tasks
-            newTask = Task newTaskId s False p
+            newTask = Task newTaskId desc False prio
          in Replace $ newTask : tasks
     Update taskid mode ->
         let
-            idCheck = idExists taskid tasks
+            idCheck = findById taskid tasks
             check = case mode of
-                Complete -> idCheck >>= notCompleted taskid
+                Complete -> idCheck >>= notCompleted
                 Delete -> idCheck
                 Edit _ -> idCheck
             action = case mode of
@@ -182,21 +188,19 @@ handleCommand tasks command = case command of
          in
             case check of
                 Left err -> Print err
-                Right t -> Replace $ action t
+                Right _ -> Replace $ action tasks
 
-idExists :: TaskId -> [Task] -> Either [Char] [Task]
-idExists taskid tasks =
-    if taskid `elem` map taskId tasks
-        then Right tasks
-        else Left $ "There is no task with id " ++ show (getTaskId taskid)
+findById :: TaskId -> [Task] -> Either String Task
+findById taskid tasks =
+    case find ((== taskid) . taskId) tasks of
+        Just t -> Right t
+        Nothing -> Left $ "There is no task with id " ++ show (getTaskId taskid)
 
-notCompleted :: TaskId -> [Task] -> Either String [Task]
-notCompleted taskid tasks = case find (\t -> taskId t == taskid) tasks of
-    Nothing -> Left $ "There is no task with id " ++ show (getTaskId taskid)
-    Just t ->
-        if completed t
-            then Left $ "Task " ++ show (getTaskId taskid) ++ " is already completed."
-            else Right tasks
+notCompleted :: Task -> Either String Task
+notCompleted task =
+    if completed task
+        then Left $ "Task " ++ show (getTaskId $ taskId task) ++ " is already completed."
+        else Right task
 
 modifyTask :: TaskId -> (Task -> Task) -> [Task] -> [Task]
 modifyTask taskid modification = map (\t -> if taskId t == taskid then modification t else t)
