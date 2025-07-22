@@ -85,6 +85,20 @@ instance ToJSON Task where
 
 instance FromJSON Task
 
+(<+>) :: String -> String -> String
+a <+> b = a <> " " <> b
+
+pretty :: Task -> String
+pretty (Task (TaskId taskid) desc compl prio) =
+    show taskid <+> complString <+> "-" <+> prioString <> ": " <+> desc
+  where
+    complString = if compl then "DONE" else "TODO"
+    prioString = case prio of
+        Nothing -> "___"
+        Just Low -> "low"
+        Just Medium -> "med"
+        Just High -> "hig"
+
 missingNumError :: String -> String
 missingNumError command =
     "For the `"
@@ -168,11 +182,11 @@ handleCommand :: [Task] -> Command -> HandleAction
 handleCommand tasks command = case command of
     Exit -> DoExit
     Help -> Print helpText
-    List -> Print $ show $ sortOn (Down . priority) tasks
-    ListDone -> Print $ show $ filter completed tasks
-    Next -> Print $ show $ filter (not . completed) tasks
+    List -> printTasksPretty $ sortOn (Down . priority) tasks
+    ListDone -> printTasksPretty $ filter completed tasks
+    Next -> printTasksPretty $ filter (not . completed) tasks
     New prio desc ->
-        let newTaskId = TaskId $ (+ 1) $ Prelude.foldr (max . getTaskId . taskId) 0 tasks
+        let newTaskId = TaskId $ (+ 1) $ foldr (max . getTaskId . taskId) 0 tasks
             newTask = Task newTaskId desc False prio
          in Replace $ newTask : tasks
     Update taskid mode ->
@@ -190,6 +204,8 @@ handleCommand tasks command = case command of
             case check of
                 Left err -> Print err
                 Right _ -> Replace $ action tasks
+  where
+    printTasksPretty l = Print $ unlines $ fmap pretty l
 
 findById :: TaskId -> [Task] -> Either String Task
 findById taskid tasks =
