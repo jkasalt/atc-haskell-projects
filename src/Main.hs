@@ -12,8 +12,9 @@ import Data.Aeson (
     genericToEncoding,
  )
 import qualified Data.ByteString.Lazy.Char8 as BL
-import Data.List (find)
+import Data.List (find, sortOn)
 import Data.Maybe (fromMaybe, isNothing)
+import Data.Ord (Down (Down))
 import GHC.Generics (Generic)
 import System.Directory (doesFileExist)
 import System.Environment (getArgs)
@@ -167,7 +168,7 @@ handleCommand :: [Task] -> Command -> HandleAction
 handleCommand tasks command = case command of
     Exit -> DoExit
     Help -> Print helpText
-    List -> Print $ show tasks
+    List -> Print $ show $ sortOn (Down . priority) tasks
     ListDone -> Print $ show $ filter completed tasks
     Next -> Print $ show $ filter (not . completed) tasks
     New prio desc ->
