@@ -1,16 +1,17 @@
 # shell.nix
 {
   pkgs ? import <nixpkgs> { },
+  ...
 }:
-
 pkgs.mkShell {
-  buildInputs = [
-    pkgs.haskellPackages.ghc
-    pkgs.haskellPackages.cabal-install
-  ];
-  nativeBuildInputs = [
-    pkgs.haskellPackages.haskell-language-server
-  ];
+  nativeBuildInputs = builtins.attrValues {
+    inherit (pkgs.haskellPackages)
+      haskell-language-server
+      ghc
+      cabal-install
+      ghcid
+      ;
+  };
 
   shellHook = ''
     cabal update
